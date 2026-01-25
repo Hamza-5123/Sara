@@ -37,7 +37,7 @@ function getVideoID(url) {
 }
 
 module.exports.config = {
-    name: "yt",
+    name: "music",
     version: "1.1.0",
     credits: "Shaan Khan", // 🔐 LOCKED TO SHAAN KHAN
     hasPermssion: 0,
