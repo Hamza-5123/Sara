@@ -1,79 +1,87 @@
 const axios = require("axios");
-const fs = require("fs-extra");
-const path = require("path");
 const yts = require("yt-search");
 
-module.exports.config = {
-  name: "music",
-  version: "4.7.0",
-  hasPermssion: 0,
-  credits: "Shaan Khan",
-  description: "Download Song/Video from YouTube with Shaan Khan Style",
-  commandCategory: "media",
-  usages: "[song name] or [song name video]",
-  cooldowns: 5,
-  dependencies: {
-    "axios": "",
-    "fs-extra": "",
-    "yt-search": "",
-    "path": ""
-  }
+// 🔐 Credits Lock Check
+function checkCredits() {
+    const correctCredits = "Shaan Khan"; 
+    if (module.exports.config.credits !== correctCredits) {
+        throw new Error("❌ Credits Locked By Shaan Khan");
+    }
+}
+
+const baseApiUrl = async () => {
+    const base = await axios.get(`https://raw.githubusercontent.com/Mostakim0978/D1PT0/refs/heads/main/baseApiUrl.json`);
+    return base.data.api;
 };
 
-module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID } = event;
-  const query = args.join(" ");
+async function getStreamFromURL(url, pathName) {
+    const response = await axios.get(url, { responseType: "stream" });
+    response.data.path = pathName;
+    return response.data;
+}
 
-  if (!query) {
-    return api.sendMessage("❌ Please provide a song name.", threadID, messageID);
-  }
+module.exports.config = {
+    name: "music", 
+    version: "1.2.4",
+    credits: "Shaan Khan", 
+    hasPermssion: 0,
+    cooldowns: 5,
+    description: "YouTube official audio downloader with API status check",
+    commandCategory: "media",
+    usages: "[Song name or URL]"
+};
 
-  const wantVideo = query.toLowerCase().endsWith(" video");
-  const searchTerm = wantVideo ? query.replace(/ video$/i, "").trim() : query.trim();
+module.exports.run = async function({ api, args, event }) {
+    const { threadID, messageID } = event;
+    let searchMsg;
 
-  // Your requested searching message
-  api.sendMessage(`✅ Apki Request Jari Hai Please wait...`, threadID, messageID);
+    try {
+        checkCredits(); 
+        const query = args.join(" ");
+        if (!query) return api.sendMessage("❌ Song ka naam likho!", threadID, messageID);
 
-  try {
-    const searchResults = await yts(searchTerm);
-    if (!searchResults.videos.length) {
-      return api.sendMessage("❌ No results found.", threadID, messageID);
+        searchMsg = await api.sendMessage(`⏳ Processing: "${query}"...`, threadID);
+
+        // API Base URL fetching
+        const apiBase = await baseApiUrl();
+        
+        // Searching Video
+        const result = await yts(query);
+        if (!result.videos.length) {
+            return api.sendMessage("❌ YouTube par kuch nahi mila!", threadID, messageID);
+        }
+        
+        const video = result.videos[0];
+        const videoID = video.videoId;
+
+        // API Call to get download link
+        const res = await axios.get(`${apiBase}/ytDl3?link=${videoID}&format=mp3`);
+        
+        if (!res.data || !res.data.data || !res.data.data.downloadLink) {
+            throw new Error("API ne download link nahi diya.");
+        }
+
+        const downloadLink = res.data.data.downloadLink;
+        const title = res.data.data.title || video.title;
+
+        // Unsend searching message
+        if (searchMsg?.messageID) api.unsendMessage(searchMsg.messageID);
+
+        // Sending Audio File
+        await api.sendMessage({
+            body: `🎵 Title: ${title}\n\n✅ File bheji ja rahi hai...`,
+            attachment: await getStreamFromURL(downloadLink, `${title}.mp3`)
+        }, threadID, messageID);
+
+    } catch (err) {
+        console.error(err);
+        if (searchMsg?.messageID) api.unsendMessage(searchMsg.messageID);
+        
+        // Specific error for large files
+        if (err.response && err.response.status === 413 || err.message.includes("large")) {
+            return api.sendMessage("⚠️ File 25MB se badi hai, Facebook allow nahi kar raha!", threadID, messageID);
+        }
+        
+        return api.sendMessage(`❌ API Error: Gaana dhoondne ya bhejne mein masla hua hai.`, threadID, messageID);
     }
-
-    const video = searchResults.videos[0];
-    const videoUrl = video.url;
-    const title = video.title;
-
-    const apiType = wantVideo ? 'ytv' : 'yta';
-    const apiUrl = `https://api.betabotz.eu.org/api/download/${apiType}?url=${encodeURIComponent(videoUrl)}&apikey=lulu`;
-
-    const res = await axios.get(apiUrl);
-    
-    if (res.data.status !== true) {
-      return api.sendMessage("❌ Download link generate nahi ho saka.", threadID, messageID);
-    }
-
-    const downloadUrl = wantVideo ? res.data.result.video : res.data.result.mp3;
-    const format = wantVideo ? "mp4" : "mp3";
-    const cachePath = path.join(__dirname, "cache", `${Date.now()}.${format}`);
-
-    await fs.ensureDir(path.join(__dirname, "cache"));
-
-    const fileStream = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
-    await fs.writeFile(cachePath, Buffer.from(fileStream.data));
-
-    // Final response with your custom text
-    await api.sendMessage({
-      body: `🎶 𝑻𝒊𝒕𝒍𝒆: ${title}\n»»𝑶𝑾𝑵𝑬𝑹««★™  »»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««\n🥀𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰👉 ${format.toUpperCase()}`,
-      attachment: fs.createReadStream(cachePath)
-    }, threadID, () => {
-      if (fs.existsSync(cachePath)) {
-        fs.unlinkSync(cachePath);
-      }
-    }, messageID);
-
-  } catch (err) {
-    console.error(err);
-    api.sendMessage("❌ Server Busy ya file bohot bari hai!", threadID, messageID);
-  }
 };
